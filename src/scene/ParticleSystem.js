@@ -135,8 +135,8 @@ export class ParticleSystem {
         // But for now, we just set them directly with noise for responsiveness.
         // Expansion factor: 
         // Closed (0) -> 0.5 (Contracted/Small)
-        // Open (1) -> 2.0 (Expanded/Large)
-        const expansion = 0.5 + (gestureFactor * 1.5);
+        // Open (1) -> 4.0 (Expanded/Large - Increased for "filling" effect)
+        const expansion = 0.5 + (gestureFactor * 3.5);
         const noiseAmt = gestureFactor * 2.0;
 
         for (let i = 0; i < this.count; i++) {
@@ -173,10 +173,11 @@ export class ParticleSystem {
             // Map hand X (0-1) to Rotation Y (-PI to PI)
             // Map hand Y (0-1) to Rotation X (-PI/2 to PI/2)
 
-            // Invert X because moving hand right (increasing x) should probably rotate scene to look right?
-            // Or usually dragging right rotates model right (Y axis).
+            // Invert X mapping to match user expectation (Left hand -> Rotate Left)
+            // Previously: (handPos.x - 0.5) * 4 * PI
+            // New: -(handPos.x - 0.5) * 4 * PI
 
-            const targetRotY = (handPos.x - 0.5) * Math.PI * 4; // Increased sensitivity
+            const targetRotY = -(handPos.x - 0.5) * Math.PI * 4;
             const targetRotX = (handPos.y - 0.5) * Math.PI * 2;
 
             // Smoothly interpolate
