@@ -10,6 +10,7 @@ export class HandTracker {
         this.results = null;
         this.gestureFactor = 0; // 0 = closed, 1 = open
         this.handPosition = null;
+        this.isPinched = false; // State for hysteresis
     }
 
     async init() {
@@ -73,50 +74,71 @@ export class HandTracker {
         if (this.results && this.results.landmarks && this.results.landmarks.length > 0) {
             const landmarks = this.results.landmarks[0];
 
-            // Calculate openness based on distance between wrist (0) and finger tips (4, 8, 12, 16, 20)
-            // Or simply average distance of tips from palm center (0 or 9)
+            // Calculate distance from wrist (landmark 0) to finger tips
+            // const wrist = landmarks[0];
 
-            const wrist = landmarks[0];
-            const tips = [4, 8, 12, 16, 20]; // Thumb, Index, Middle, Ring, Pinky tips
-
-            let totalDist = 0;
-            for (const tipIdx of tips) {
-                const tip = landmarks[tipIdx];
-                const dist = Math.sqrt(
-                    Math.pow(tip.x - wrist.x, 2) +
-                    Math.pow(tip.y - wrist.y, 2) +
-                    Math.pow(tip.z - wrist.z, 2)
-                );
-                totalDist += dist;
-            }
-
-            const avgDist = totalDist / 5;
-
-            // Normalize avgDist. 
-            // Closed fist is roughly 0.1 - 0.2
-            // Open hand is roughly 0.4 - 0.6
-            // These values depend on camera distance, but we can try to normalize roughly.
-            // A better way is to compare tip-to-wrist vs mcp-to-wrist, but let's start simple.
-
-            // Clamp and normalize
-            const minClosed = 0.15;
-            const maxOpen = 0.4;
-
-            this.gestureFactor = (avgDist - minClosed) / (maxOpen - minClosed);
-            this.gestureFactor = Math.max(0, Math.min(1, this.gestureFactor));
-
-            // Track Index Finger Tip (Landmark 8) for rotation control
+            // Finger tips: 4 (Thumb), 8 (Index)
+            const thumbTip = landmarks[4];
             const indexTip = landmarks[8];
 
-            // Store normalized position (0-1)
-            // Note: MediaPipe x is 0-1 (left-right), y is 0-1 (top-bottom)
-            this.handPosition = { x: indexTip.x, y: indexTip.y };
+            const getDist = (p1, p2) => Math.hypot(p1.x - p2.x, p1.y - p2.y);
 
-            // console.log('Gesture Factor:', this.gestureFactor);
+            // Pinch Detection (Thumb Tip to Index Tip)
+            const pinchDist = getDist(thumbTip, indexTip);
+
+            // Hysteresis Logic
+            // Enter Pinch Mode: Distance < 0.03 (Strict)
+            // Exit Pinch Mode: Distance > 0.06 (Relaxed)
+
+            if (!this.isPinched && pinchDist < 0.03) {
+                this.isPinched = true;
+            } else if (this.isPinched && pinchDist > 0.06) {
+                this.isPinched = false;
+            }
+
+            // Track Index Finger Tip (Landmark 8) for position
+            // Store normalized position (0-1)
+            const currentHandPos = { x: indexTip.x, y: indexTip.y };
+
+            if (this.isPinched) {
+                // --- SCALING MODE ---
+                // Use Extension of remaining 3 fingers (Middle, Ring, Pinky) to control Scale
+                // Tips: 12 (Middle), 16 (Ring), 20 (Pinky)
+                // Wrist: 0
+
+                const wrist = landmarks[0];
+                const d1 = getDist(landmarks[12], wrist);
+                const d2 = getDist(landmarks[16], wrist);
+                const d3 = getDist(landmarks[20], wrist);
+
+                const avgDist = (d1 + d2 + d3) / 3;
+
+                // Map avgDist to 0..1
+                // Closed fist is approx 0.1 - 0.15
+                // Open hand is approx 0.3 - 0.4
+                // Let's set range: 0.15 (Closed) -> 0.35 (Open)
+
+                const minD = 0.15;
+                const maxD = 0.35;
+                const targetScale = Math.max(0, Math.min(1, (avgDist - minD) / (maxD - minD)));
+
+                // Smoothly interpolate gestureFactor
+                this.gestureFactor += (targetScale - this.gestureFactor) * 0.1;
+
+                // Lock Rotation (do not update this.handPosition)
+
+            } else {
+                // --- ROTATION MODE ---
+                // Update Rotation
+                this.handPosition = currentHandPos;
+
+                // Lock Scaling (do not update gestureFactor)
+            }
+
+            // console.log(`Pinch: ${isPinch}, Dist: ${pinchDist.toFixed(3)}, Factor: ${this.gestureFactor.toFixed(2)}`);
+
         } else {
-            // No hand detected, maybe slowly return to default or keep last?
-            // For now, let's drift to 0.5 or 1.0? 
-            // Let's keep it as is or decay.
+            // No hand detected
             this.handPosition = null;
         }
     }
